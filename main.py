@@ -1,8 +1,8 @@
 import PyPDF2
 import base64
 import requests
-from langchain_core.runnables import RunnableLambda
 
+from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers.string import StrOutputParser
@@ -149,6 +149,7 @@ if __name__ == "__main__":
             "study_material": study_material
         } for topic, study_material in inputs
     ]
+
     responses = combined_chain.map().invoke(inputs_data)
 
     # Agent's responses
