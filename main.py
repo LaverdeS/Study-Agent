@@ -2,6 +2,7 @@ import PyPDF2
 import base64
 import requests
 
+from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers.string import StrOutputParser
@@ -44,13 +45,10 @@ An answer key at the end
 
 Keep the questions relevant to the summary content and designed for effective review.
 
-Use the following output format when generating the output response:
-
-output format instructions:
-{format_instructions}
-
 Study material summary:
 {summary}
+
+Quiz:
 """
 
 
@@ -92,20 +90,12 @@ def draw_mermaid_graph(chain):
     url = f"https://mermaid.ink/img/{encoded}"
     url_response = requests.get(url)
 
-    if url_response.status_code == 200:
+    if url_response.status_code != 200:
+        print(f"Error fetching image: {url_response.status_code}")
+    else:
         with open("chain_workflow.png", "wb") as f:
             f.write(url_response.content)
         print("Chain workflow graph saved as chain_workflow.png")
-    else:
-        print(f"Error fetching image: {url_response.status_code}")
-
-
-class QueryResponse(BaseModel):
-    summary: str = Field(description="A concise summary of the study material in bullet-point format.")
-    quiz: str = Field(description="A set of multiple-choice questions generated from the summary, including distractors and an answer key.")
-
-
-parser = PydanticOutputParser(pydantic_object=QueryResponse)
 
 
 # Inputs
@@ -130,11 +120,7 @@ summarize_chain =(
         StrOutputParser()
 )
 
-quiz_prompt_template = PromptTemplate(
-    template=CREATE_QUIZ_PROMPT_TEMPLATE,
-    input_variables=["summary"],
-    partial_variables={"format_instructions": parser.get_format_instructions()},
-)
+quiz_prompt_template = PromptTemplate.from_template(CREATE_QUIZ_PROMPT_TEMPLATE)
 
 quiz_chain =(
         quiz_prompt_template
@@ -147,7 +133,10 @@ quiz_chain =(
 combined_chain = (
     summarize_chain
     |
-    quiz_chain
+    RunnableLambda(lambda summary: {
+        "summary": summary,
+        "quiz": quiz_chain.invoke({"summary": summary})
+    })
 )
 
 draw_mermaid_graph(combined_chain)
@@ -160,9 +149,14 @@ if __name__ == "__main__":
             "study_material": study_material
         } for topic, study_material in inputs
     ]
-    response = combined_chain.map().invoke(inputs_data)
+
+    responses = combined_chain.map().invoke(inputs_data)
 
     # Agent's responses
-    for (topic, _), quiz in zip(inputs, response):
+    for (topic, _), response in zip(inputs, responses):
         print("\n" + "-" * 10 + " New quiz! ✨ " + "-" * 10)
-        print("Topic: {}\n\n{}".format(topic, quiz))
+        print("Topic: {}\n\nSummary: \n{}\n\nQuiz: \n{}".format(
+            topic,
+            response["summary"],
+            response["quiz"]
+        ))
